@@ -1,8 +1,9 @@
-from datetime import date
 from decimal import Decimal
+
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
+from modules.directory import contracts as directory
 from modules.elm.domain.year_end import compute_year_end_outcomes
 from modules.elm.models import (
     ApplicationTransition,
@@ -21,6 +22,10 @@ def record_offline_leave(principal, data: dict) -> LeaveApplication:
     require(principal, "leave_elm.admin.manage")
 
     emp_user_id = data["user_id"]
+    employee = directory.get_users([emp_user_id]).get(emp_user_id)
+    if employee is None or employee.kind not in {"faculty", "staff"}:
+        raise ValidationError({"user_id": "Select an existing faculty or staff member."})
+
     category = data["leave_category"]
     start_date = data["start_date"]
     end_date = data["end_date"]
@@ -40,12 +45,14 @@ def record_offline_leave(principal, data: dict) -> LeaveApplication:
         offline_sanction_reference=reference,
     )
 
-    bal = EmployeeLeaveBalance.objects.filter(
-        user_id=emp_user_id, year=start_date.year, leave_category=category
-    ).first()
-    if bal:
-        bal.availed_days += leave_days
-        bal.save()
+    get_user_balances(emp_user_id, start_date.year, employee.kind)
+    bal = EmployeeLeaveBalance.objects.select_for_update().get(
+        user_id=emp_user_id,
+        year=start_date.year,
+        leave_category=category,
+    )
+    bal.availed_days += leave_days
+    bal.save(update_fields=["availed_days", "updated_at"])
 
     ApplicationTransition.objects.create(
         application=app,
@@ -58,13 +65,18 @@ def record_offline_leave(principal, data: dict) -> LeaveApplication:
 
 
 @transaction.atomic
-def run_year_end_processing(year: int, user_ids: list[int], is_faculty_map: dict[int, bool]) -> list[YearEndTransaction]:
+def run_year_end_processing(
+    year: int, user_ids: list[int], is_faculty_map: dict[int, bool]
+) -> list[YearEndTransaction]:
     """Execute event-triggered year-end leave balance conversion and carry-forward (Section 13)."""
     tx_list: list[YearEndTransaction] = []
 
     for uid in user_ids:
-        is_faculty = is_faculty_map.get(uid, False)
-        balances = {b.leave_category: b for b in get_user_balances(uid, year)}
+        if uid not in is_faculty_map:
+            raise ValidationError({"user_ids": f"Missing faculty classification for {uid}."})
+        is_faculty = is_faculty_map[uid]
+        employee_kind = "faculty" if is_faculty else "staff"
+        balances = {b.leave_category: b for b in get_user_balances(uid, year, employee_kind)}
         avail_map = {cat: b.available_days for cat, b in balances.items()}
 
         outcomes = compute_year_end_outcomes(avail_map, is_faculty=is_faculty)
@@ -104,6 +116,8 @@ def run_year_end_processing(year: int, user_ids: list[int], is_faculty_map: dict
 def publish_holiday(principal, data: dict) -> HolidayCalendar:
     """Publish a holiday or restricted holiday (Section 12)."""
     require(principal, "leave_elm.admin.manage")
+    if HolidayCalendar.objects.filter(date=data["date"]).exists():
+        raise ValidationError({"date": "A holiday is already registered for this date."})
     return HolidayCalendar.objects.create(
         date=data["date"],
         name=data["name"],

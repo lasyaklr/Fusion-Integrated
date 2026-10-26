@@ -10,6 +10,10 @@ export default function MyLeavesPage() {
   const [loading, setLoading] = useState(true);
   const [cancelModal, setCancelModal] = useState<number | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [extensionApp, setExtensionApp] = useState<any | null>(null);
+  const [extensionForm, setExtensionForm] = useState({ start_date: "", end_date: "", reason: "" });
+  const [resumptionApp, setResumptionApp] = useState<any | null>(null);
+  const [resumptionForm, setResumptionForm] = useState({ actual_date: "", remarks: "" });
 
   const fetchData = async () => {
     try {
@@ -57,6 +61,53 @@ export default function MyLeavesPage() {
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleExtensionRequest = async () => {
+    if (!extensionApp) return;
+    try {
+      const res = await fetch(`/api/v1/elm/applications/${extensionApp.id}/extend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leave_category: extensionApp.leave_category,
+          ...extensionForm,
+        }),
+      });
+      if (!res.ok) throw new Error(`Could not request an extension (${res.status}).`);
+      notifications.show({ title: "Success", message: "Leave extension requested." });
+      setExtensionApp(null);
+      setExtensionForm({ start_date: "", end_date: "", reason: "" });
+      fetchData();
+    } catch (e) {
+      notifications.show({
+        title: "Error",
+        message: e instanceof Error ? e.message : "Could not request an extension.",
+        color: "red",
+      });
+    }
+  };
+
+  const handleResumptionSubmit = async () => {
+    if (!resumptionApp) return;
+    try {
+      const res = await fetch(`/api/v1/elm/applications/${resumptionApp.id}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(resumptionForm),
+      });
+      if (!res.ok) throw new Error(`Could not submit the resumption report (${res.status}).`);
+      notifications.show({ title: "Success", message: "Resumption report submitted." });
+      setResumptionApp(null);
+      setResumptionForm({ actual_date: "", remarks: "" });
+      fetchData();
+    } catch (e) {
+      notifications.show({
+        title: "Error",
+        message: e instanceof Error ? e.message : "Could not submit the resumption report.",
+        color: "red",
+      });
     }
   };
 
@@ -114,9 +165,27 @@ export default function MyLeavesPage() {
                         </Button>
                       )}
                       {app.status === "approved" && (
-                        <Button size="xs" color="orange" variant="subtle" onClick={() => setCancelModal(app.id)}>
-                          Cancel
-                        </Button>
+                        <>
+                          <Button size="xs" color="orange" variant="subtle" onClick={() => setCancelModal(app.id)}>
+                            Cancel
+                          </Button>
+                          {["EL", "COL", "VL"].includes(app.leave_category) && (
+                            <>
+                              <Button size="xs" variant="subtle" onClick={() => {
+                                setExtensionApp(app);
+                                setExtensionForm({ start_date: "", end_date: "", reason: "" });
+                              }}>
+                                Extend
+                              </Button>
+                              <Button size="xs" variant="subtle" onClick={() => {
+                                setResumptionApp(app);
+                                setResumptionForm({ actual_date: "", remarks: "" });
+                              }}>
+                                Report return
+                              </Button>
+                            </>
+                          )}
+                        </>
                       )}
                     </Group>
                   </Table.Td>
@@ -146,6 +215,57 @@ export default function MyLeavesPage() {
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setCancelModal(null)}>Back</Button>
             <Button color="orange" onClick={handleCancelRequest}>Submit Cancellation Request</Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal opened={extensionApp !== null} onClose={() => setExtensionApp(null)} title="Request Leave Extension">
+        <Stack>
+          <Text size="sm">Category: {extensionApp?.leave_category}</Text>
+          <TextInput
+            label="Extension Start Date"
+            type="date"
+            value={extensionForm.start_date}
+            onChange={(e) => setExtensionForm({ ...extensionForm, start_date: e.target.value })}
+            required
+          />
+          <TextInput
+            label="Extension End Date"
+            type="date"
+            value={extensionForm.end_date}
+            onChange={(e) => setExtensionForm({ ...extensionForm, end_date: e.target.value })}
+            required
+          />
+          <Textarea
+            label="Reason"
+            value={extensionForm.reason}
+            onChange={(e) => setExtensionForm({ ...extensionForm, reason: e.currentTarget.value })}
+            required
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setExtensionApp(null)}>Back</Button>
+            <Button onClick={handleExtensionRequest}>Submit Extension</Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal opened={resumptionApp !== null} onClose={() => setResumptionApp(null)} title="Report Return to Duty">
+        <Stack>
+          <TextInput
+            label="Actual Return Date"
+            type="date"
+            value={resumptionForm.actual_date}
+            onChange={(e) => setResumptionForm({ ...resumptionForm, actual_date: e.target.value })}
+            required
+          />
+          <Textarea
+            label="Remarks"
+            value={resumptionForm.remarks}
+            onChange={(e) => setResumptionForm({ ...resumptionForm, remarks: e.currentTarget.value })}
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setResumptionApp(null)}>Back</Button>
+            <Button onClick={handleResumptionSubmit}>Submit Report</Button>
           </Group>
         </Stack>
       </Modal>

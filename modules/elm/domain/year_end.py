@@ -1,4 +1,5 @@
 """Year-end processing domain rules (Section 13)."""
+
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -7,7 +8,6 @@ from modules.elm.domain.constants import (
     COL,
     DEFAULT_ENTITLEMENTS,
     EL,
-    LAPSE_AT_YEAR_END,
     RH,
     SCL,
     VL,

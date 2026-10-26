@@ -1,7 +1,7 @@
 from modules.elm.selectors.applications import (
-    visible_applications,
-    pending_substitute_requests,
     pending_approvals,
+    pending_substitute_requests,
+    visible_applications,
 )
 from modules.elm.selectors.balances import (
     get_user_balances,
@@ -12,10 +12,10 @@ from modules.elm.selectors.calendars import (
 )
 
 __all__ = [
-    "visible_applications",
-    "pending_substitute_requests",
-    "pending_approvals",
-    "get_user_balances",
     "get_published_holidays",
+    "get_user_balances",
     "get_vacation_periods",
+    "pending_approvals",
+    "pending_substitute_requests",
+    "visible_applications",
 ]

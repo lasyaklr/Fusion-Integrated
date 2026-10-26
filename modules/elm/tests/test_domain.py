@@ -1,11 +1,13 @@
 from datetime import date
 from decimal import Decimal
+
 import pytest
 
 from modules.elm.domain.constants import CL, EL, RH, SCL, VL
 from modules.elm.domain.counting import calculate_leave_days
-from modules.elm.domain.eligibility import check_overlap, validate_eligibility_and_balance
+from modules.elm.domain.eligibility import check_overlap
 from modules.elm.domain.state_machine import (
+    InvalidTransitionError,
     initial_status,
     transition_substitute_response,
     transition_unit_head_decision,
@@ -40,7 +42,9 @@ def test_half_day_cl():
 
 def test_overlap_allowed_different_half_day():
     d = date(2026, 10, 6)
-    existing = [{"start_date": d, "end_date": d, "leave_category": CL, "half_day_type": "first_half"}]
+    existing = [
+        {"start_date": d, "end_date": d, "leave_category": CL, "half_day_type": "first_half"}
+    ]
     # Second half on same day should not overlap
     is_overlapping = check_overlap(d, d, CL, "second_half", existing)
     assert not is_overlapping
@@ -52,7 +56,15 @@ def test_state_machine_flow():
     # CL Unit Head is final
     assert transition_unit_head_decision("pending_unit_head", CL, "approved") == "approved"
     # EL Unit Head recommended moves to higher sanction
-    assert transition_unit_head_decision("pending_unit_head", EL, "recommended") == "pending_higher_sanction"
+    assert (
+        transition_unit_head_decision("pending_unit_head", EL, "recommended")
+        == "pending_higher_sanction"
+    )
+
+
+def test_withdrawal_is_not_allowed_during_cancellation_review():
+    with pytest.raises(InvalidTransitionError):
+        transition_withdraw("cancellation_requested")
 
 
 def test_year_end_processing_faculty():

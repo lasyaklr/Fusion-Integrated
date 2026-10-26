@@ -1,4 +1,5 @@
 """Leave-day counting domain rules (Section 4)."""
+
 from datetime import date, timedelta
 from decimal import Decimal
 

@@ -8,16 +8,21 @@ import { PageHeader } from "../../../ui/components/PageHeader";
 export default function ApprovalsPage() {
   const [items, setItems] = useState<any[]>([]);
   const [actionItem, setActionItem] = useState<any | null>(null);
-  const [actionType, setActionType] = useState<"recommend" | "sanction">("recommend");
+  const [actionType, setActionType] = useState<"recommend" | "sanction" | "cancellation" | "resumption">("recommend");
   const [decision, setDecision] = useState("recommended");
   const [remarks, setRemarks] = useState("");
 
   const fetchItems = async () => {
     try {
       const res = await fetch("/api/v1/elm/approvals/pending");
-      if (res.ok) setItems(await res.json());
+      if (!res.ok) throw new Error(`Could not load approvals (${res.status}).`);
+      setItems(await res.json());
     } catch (e) {
-      console.error(e);
+      notifications.show({
+        title: "Error",
+        message: e instanceof Error ? e.message : "Could not load approvals.",
+        color: "red",
+      });
     }
   };
 
@@ -27,9 +32,13 @@ export default function ApprovalsPage() {
 
   const handleAction = async () => {
     if (!actionItem) return;
-    const url = actionType === "recommend"
-      ? `/api/v1/elm/applications/${actionItem.id}/recommend`
-      : `/api/v1/elm/applications/${actionItem.id}/sanction`;
+    const paths = {
+      recommend: "recommend",
+      sanction: "sanction",
+      cancellation: "cancellation-decision",
+      resumption: "resumption-review",
+    };
+    const url = `/api/v1/elm/applications/${actionItem.id}/${paths[actionType]}`;
 
     const body = actionType === "recommend"
       ? { recommendation: decision, remarks }
@@ -41,14 +50,17 @@ export default function ApprovalsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (res.ok) {
-        notifications.show({ title: "Success", message: "Action recorded." });
-        setActionItem(null);
-        setRemarks("");
-        fetchItems();
-      }
+      if (!res.ok) throw new Error(`Could not record the decision (${res.status}).`);
+      notifications.show({ title: "Success", message: "Action recorded." });
+      setActionItem(null);
+      setRemarks("");
+      await fetchItems();
     } catch (e) {
-      console.error(e);
+      notifications.show({
+        title: "Error",
+        message: e instanceof Error ? e.message : "Could not record the decision.",
+        color: "red",
+      });
     }
   };
 
@@ -99,6 +111,24 @@ export default function ApprovalsPage() {
                         setDecision("approved");
                       }}>
                         Sanction
+                      </Button>
+                    )}
+                    {item.status === "cancellation_requested" && (
+                      <Button size="xs" color="orange" onClick={() => {
+                        setActionItem(item);
+                        setActionType("cancellation");
+                        setDecision("approved");
+                      }}>
+                        Review cancellation
+                      </Button>
+                    )}
+                    {item.resumption_status === "pending" && (
+                      <Button size="xs" color="grape" onClick={() => {
+                        setActionItem(item);
+                        setActionType("resumption");
+                        setDecision("approved");
+                      }}>
+                        Review resumption
                       </Button>
                     )}
                   </Group>

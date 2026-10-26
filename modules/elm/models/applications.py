@@ -1,5 +1,7 @@
 from decimal import Decimal
+
 from django.db import models
+
 from core.db.mixins import TimeStampedModel, UserScopedModel
 
 
@@ -79,3 +81,9 @@ class ApplicationTransition(models.Model):
     class Meta:
         db_table = "elm_application_transition"
         ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return (
+            f"leave#{self.application_id} {self.from_status} -> "
+            f"{self.to_status} by u{self.actor_user_id}"
+        )

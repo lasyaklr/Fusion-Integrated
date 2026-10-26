@@ -1,32 +1,26 @@
 from datetime import date
 from decimal import Decimal
+
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from modules.elm.domain.constants import (
-    CL,
+    ACTIVE_IN_FLIGHT_STATUSES,
     DECISION_APPROVED,
     DECISION_REJECTED,
-    LEAVE_CATEGORIES,
-    RECOMMENDATION_NOT_RECOMMENDED,
-    RECOMMENDATION_RECOMMENDED,
     RH,
     STATUS_APPROVED,
     STATUS_CANCELLATION_REQUESTED,
-    STATUS_CANCELLED,
-    STATUS_PENDING_HIGHER_SANCTION,
-    STATUS_PENDING_SUBSTITUTE,
-    STATUS_PENDING_UNIT_HEAD,
     STATUS_REJECTED,
-    STATUS_RESUMED,
-    STATUS_SUBSTITUTE_DECLINED,
-    STATUS_WITHDRAWN,
     SUBSTITUTE_ACCEPTED,
     SUBSTITUTE_DECLINED,
-    VL,
 )
 from modules.elm.domain.counting import calculate_leave_days
+from modules.elm.domain.eligibility import (
+    ValidationError as EligibilityValidationError,
+)
 from modules.elm.domain.eligibility import (
     check_overlap,
     validate_eligibility_and_balance,
@@ -69,12 +63,16 @@ def submit_application(principal, data: dict) -> LeaveApplication:
     # Fetch closed holidays and RH
     closed_holidays = set(
         HolidayCalendar.objects.filter(
-            year=start_date.year, is_restricted_holiday=False, is_published=True
+            date__range=(start_date, end_date),
+            is_restricted_holiday=False,
+            is_published=True,
         ).values_list("date", flat=True)
     )
     rh_days = set(
         HolidayCalendar.objects.filter(
-            year=start_date.year, is_restricted_holiday=True, is_published=True
+            date__range=(start_date, end_date),
+            is_restricted_holiday=True,
+            is_published=True,
         ).values_list("date", flat=True)
     )
 
@@ -93,8 +91,16 @@ def submit_application(principal, data: dict) -> LeaveApplication:
     ).exists()
 
     # Get employee balance
-    user_balances = {b.leave_category: b for b in get_user_balances(principal.user_id, start_date.year)}
-    bal_obj = user_balances.get(category)
+    get_user_balances(principal.user_id, start_date.year, principal.kind)
+    bal_obj = (
+        EmployeeLeaveBalance.objects.select_for_update()
+        .filter(
+            user_id=principal.user_id,
+            year=start_date.year,
+            leave_category=category,
+        )
+        .first()
+    )
     available = bal_obj.available_days if bal_obj else Decimal("0.0")
 
     # Validate eligibility & balance
@@ -109,23 +115,24 @@ def submit_application(principal, data: dict) -> LeaveApplication:
             is_vacation_period=is_vacation,
             is_rh_calendar_day=is_rh,
         )
-    except Exception as exc:
-        raise ValidationError(str(exc))
+    except EligibilityValidationError as exc:
+        raise ValidationError(str(exc)) from exc
 
     # Overlap validation with active leaves
     existing = list(
         LeaveApplication.objects.filter(
             user_id=principal.user_id,
             status__in=[
-                STATUS_PENDING_SUBSTITUTE,
-                STATUS_PENDING_UNIT_HEAD,
-                STATUS_PENDING_HIGHER_SANCTION,
+                *ACTIVE_IN_FLIGHT_STATUSES,
                 STATUS_APPROVED,
+                STATUS_CANCELLATION_REQUESTED,
             ],
         ).values("start_date", "end_date", "leave_category", "half_day_type")
     )
     if check_overlap(start_date, end_date, category, half_day, existing):
-        raise ValidationError("Leave request impermissibly overlaps with an active or pending leave.")
+        raise ValidationError(
+            "Leave request impermissibly overlaps with an active or pending leave."
+        )
 
     # Validate substitute if nominated
     sub_status = "none"
@@ -134,17 +141,16 @@ def submit_application(principal, data: dict) -> LeaveApplication:
             LeaveApplication.objects.filter(
                 user_id=substitute_id,
                 status__in=[
-                    STATUS_PENDING_SUBSTITUTE,
-                    STATUS_PENDING_UNIT_HEAD,
-                    STATUS_PENDING_HIGHER_SANCTION,
+                    *ACTIVE_IN_FLIGHT_STATUSES,
                     STATUS_APPROVED,
+                    STATUS_CANCELLATION_REQUESTED,
                 ],
             ).values("start_date", "end_date")
         )
         try:
             validate_substitute(principal.user_id, substitute_id, start_date, end_date, sub_leaves)
-        except Exception as exc:
-            raise ValidationError(str(exc))
+        except EligibilityValidationError as exc:
+            raise ValidationError(str(exc)) from exc
         sub_status = "pending"
 
     # Determine initial status
@@ -165,6 +171,8 @@ def submit_application(principal, data: dict) -> LeaveApplication:
         status=status,
         substitute_user_id=substitute_id,
         substitute_status=sub_status,
+        is_extension=data.get("is_extension", False),
+        parent_application_id=data.get("parent_application_id"),
         is_station_leave=is_station,
         station_start_date=data.get("station_start_date"),
         station_end_date=data.get("station_end_date"),
@@ -176,11 +184,11 @@ def submit_application(principal, data: dict) -> LeaveApplication:
     if status == STATUS_APPROVED:
         # Deduct balance immediately for Director self-sanction
         bal_obj.availed_days += leave_days
-        bal_obj.save()
+        bal_obj.save(update_fields=["availed_days", "updated_at"])
     else:
         # Hold in pending balance
         bal_obj.pending_days += leave_days
-        bal_obj.save()
+        bal_obj.save(update_fields=["pending_days", "updated_at"])
 
     # Log initial transition
     ApplicationTransition.objects.create(
@@ -207,22 +215,25 @@ def submit_application(principal, data: dict) -> LeaveApplication:
 def withdraw_application(principal, application_id: int) -> LeaveApplication:
     """Withdraw a pending leave application immediately (Section 8)."""
     require(principal, "leave_elm.application.withdraw")
-    app = LeaveApplication.objects.select_for_update().get(pk=application_id)
-
-    if app.user_id != principal.user_id:
-        raise ValidationError("You can only withdraw your own applications.")
+    app = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=application_id,
+        user_id=principal.user_id,
+    )
 
     from_status = app.status
     app.status = transition_withdraw(from_status)
     app.save()
 
     # Release pending balance
-    bal = EmployeeLeaveBalance.objects.filter(
-        user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category
-    ).first()
-    if bal and bal.pending_days >= app.calculated_days:
+    bal = (
+        EmployeeLeaveBalance.objects.select_for_update()
+        .filter(user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category)
+        .first()
+    )
+    if bal:
         bal.pending_days -= app.calculated_days
-        bal.save()
+        bal.save(update_fields=["pending_days", "updated_at"])
 
     ApplicationTransition.objects.create(
         application=app,
@@ -237,13 +248,18 @@ def withdraw_application(principal, application_id: int) -> LeaveApplication:
 
 
 @transaction.atomic
-def respond_substitute(principal, application_id: int, action: str, remarks: str = "") -> LeaveApplication:
+def respond_substitute(
+    principal, application_id: int, action: str, remarks: str = ""
+) -> LeaveApplication:
     """Record substitute consent (Section 6)."""
     require(principal, "leave_elm.substitute.respond")
-    app = LeaveApplication.objects.select_for_update().get(pk=application_id)
-
-    if app.substitute_user_id != principal.user_id:
-        raise ValidationError("You are not the nominated substitute for this request.")
+    app = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=application_id,
+        substitute_user_id=principal.user_id,
+        substitute_status="pending",
+        status="pending_substitute",
+    )
 
     from_status = app.status
     if action == "accept":
@@ -278,7 +294,11 @@ def recommend_unit_head(
 ) -> LeaveApplication:
     """Record Unit Head recommendation or final decision (Section 7)."""
     require(principal, "leave_elm.application.review")
-    app = LeaveApplication.objects.select_for_update().get(pk=application_id)
+    app = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=application_id,
+        status="pending_unit_head",
+    )
 
     from_status = app.status
     next_status = transition_unit_head_decision(from_status, app.leave_category, recommendation)
@@ -288,9 +308,11 @@ def recommend_unit_head(
     app.unit_head_remarks = remarks
     app.status = next_status
 
-    bal = EmployeeLeaveBalance.objects.filter(
-        user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category
-    ).first()
+    bal = (
+        EmployeeLeaveBalance.objects.select_for_update()
+        .filter(user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category)
+        .first()
+    )
 
     if next_status == STATUS_APPROVED:
         app.final_decision = DECISION_APPROVED
@@ -324,7 +346,11 @@ def sanction_application(
 ) -> LeaveApplication:
     """Record final sanctioning authority decision (Section 7)."""
     require(principal, "leave_elm.application.approve")
-    app = LeaveApplication.objects.select_for_update().get(pk=application_id)
+    app = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=application_id,
+        status="pending_higher_sanction",
+    )
 
     from_status = app.status
     next_status = transition_higher_sanction(from_status, decision)
@@ -335,19 +361,20 @@ def sanction_application(
     app.final_remarks = remarks
     app.status = next_status
 
-    bal = EmployeeLeaveBalance.objects.filter(
-        user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category
-    ).first()
+    bal = (
+        EmployeeLeaveBalance.objects.select_for_update()
+        .filter(user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category)
+        .first()
+    )
 
     if decision == DECISION_APPROVED:
         if bal:
             bal.pending_days = max(Decimal("0.0"), bal.pending_days - app.calculated_days)
             bal.availed_days += app.calculated_days
             bal.save()
-    elif decision == DECISION_REJECTED:
-        if bal:
-            bal.pending_days = max(Decimal("0.0"), bal.pending_days - app.calculated_days)
-            bal.save()
+    elif decision == DECISION_REJECTED and bal:
+        bal.pending_days = max(Decimal("0.0"), bal.pending_days - app.calculated_days)
+        bal.save()
 
     app.save()
 
@@ -365,12 +392,14 @@ def sanction_application(
 def request_cancellation(principal, application_id: int, reason: str) -> LeaveApplication:
     """Request pre-start cancellation for approved leave (Section 8)."""
     require(principal, "leave_elm.application.cancel")
-    app = LeaveApplication.objects.select_for_update().get(pk=application_id)
+    app = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=application_id,
+        status=STATUS_APPROVED,
+        user_id=principal.user_id,
+    )
 
-    if app.user_id != principal.user_id:
-        raise ValidationError("You can only cancel your own approved leaves.")
-
-    if date.today() >= app.start_date:
+    if timezone.localdate() >= app.start_date:
         raise ValidationError("Once leave has begun, pre-start cancellation no longer applies.")
 
     from_status = app.status
@@ -394,7 +423,11 @@ def approve_cancellation(
 ) -> LeaveApplication:
     """Approve or reject cancellation request (Section 8)."""
     require(principal, "leave_elm.application.approve")
-    app = LeaveApplication.objects.select_for_update().get(pk=application_id)
+    app = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=application_id,
+        status=STATUS_CANCELLATION_REQUESTED,
+    )
 
     from_status = app.status
     next_status = transition_cancellation_decision(from_status, decision)
@@ -402,9 +435,13 @@ def approve_cancellation(
 
     if decision == DECISION_APPROVED:
         # Restore deducted balance
-        bal = EmployeeLeaveBalance.objects.filter(
-            user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category
-        ).first()
+        bal = (
+            EmployeeLeaveBalance.objects.select_for_update()
+            .filter(
+                user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category
+            )
+            .first()
+        )
         if bal:
             bal.availed_days = max(Decimal("0.0"), bal.availed_days - app.calculated_days)
             bal.save()
@@ -425,13 +462,16 @@ def approve_cancellation(
 def request_extension(principal, parent_id: int, data: dict) -> LeaveApplication:
     """Request extension for ongoing EL/COL/VL (Section 9)."""
     require(principal, "leave_elm.application.extend")
-    parent = LeaveApplication.objects.get(pk=parent_id)
-
-    if parent.user_id != principal.user_id:
-        raise ValidationError("You can only extend your own ongoing leave.")
+    parent = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=parent_id,
+        user_id=principal.user_id,
+    )
 
     if parent.leave_category not in ("EL", "COL", "VL"):
         raise ValidationError("Extension is supported only for ongoing EL, COL, or VL.")
+    if parent.status != STATUS_APPROVED:
+        raise ValidationError("Only approved leave can be extended.")
 
     data["is_extension"] = True
     data["parent_application_id"] = parent.pk
@@ -445,13 +485,18 @@ def submit_resumption(
 ) -> LeaveApplication:
     """Submit return to duty resumption details (Section 10)."""
     require(principal, "leave_elm.application.resume")
-    app = LeaveApplication.objects.select_for_update().get(pk=application_id)
-
-    if app.user_id != principal.user_id:
-        raise ValidationError("You can only submit resumption for your own leave.")
+    app = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=application_id,
+        user_id=principal.user_id,
+    )
 
     if app.leave_category not in ("EL", "COL", "VL"):
         raise ValidationError("Resumption is supported only for EL, COL, and VL.")
+    if app.status != STATUS_APPROVED:
+        raise ValidationError("Resumption can only be submitted for approved leave.")
+    if app.resumption_status == "pending":
+        raise ValidationError("A resumption report is already pending review.")
 
     app.resumption_date = actual_date
     app.resumption_status = "pending"
@@ -474,18 +519,32 @@ def review_resumption(
 ) -> LeaveApplication:
     """Review resumption and adjust balance for early/late return (Section 10)."""
     require(principal, "leave_elm.application.approve")
-    app = LeaveApplication.objects.select_for_update().get(pk=application_id)
+    app = get_object_or_404(
+        LeaveApplication.objects.select_for_update(),
+        pk=application_id,
+        status="approved",
+        resumption_status="pending",
+    )
 
     from_status = app.status
-    app.status = transition_resumption(from_status)
+    if app.resumption_status != "pending" or app.resumption_date is None:
+        raise ValidationError("There is no pending resumption report for this leave.")
+    if decision not in (DECISION_APPROVED, DECISION_REJECTED):
+        raise ValidationError(f"Invalid resumption decision: {decision!r}.")
+    if decision == DECISION_APPROVED:
+        app.status = transition_resumption(from_status)
     app.resumption_status = decision
 
     if decision == DECISION_APPROVED and app.resumption_date:
         # Check early or late return
         diff_days = (app.resumption_date - app.end_date).days
-        bal = EmployeeLeaveBalance.objects.filter(
-            user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category
-        ).first()
+        bal = (
+            EmployeeLeaveBalance.objects.select_for_update()
+            .filter(
+                user_id=app.user_id, year=app.start_date.year, leave_category=app.leave_category
+            )
+            .first()
+        )
 
         if diff_days != 0 and bal:
             # early return: diff_days < 0 -> restore unused days

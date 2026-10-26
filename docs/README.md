@@ -11,6 +11,11 @@ review date in its front matter.
 
 ## Start here
 
+> **ELM specification availability:** the ELM links below are the required reference set,
+> but `docs/09-leave/` is not present in this checkout. The module's section comments are
+> not a substitute; restore the specification set before claiming a complete requirements
+> audit or changing policy and approval routing.
+
 | If you are… | Read, in this order |
 |---|---|
 | **New to the project** | [Vision & scope](00-overview/vision-and-scope.md) → [Current-state assessment](00-overview/current-state-assessment.md) → [Glossary](00-overview/glossary.md) → [System architecture](01-architecture/system-architecture.md) |

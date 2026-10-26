@@ -1,13 +1,14 @@
 """Domain constants for Employee Leave Management."""
+
 from decimal import Decimal
 
 # Leave Categories
-CL = "CL"       # Casual Leave (8 days/year, 0.5 half day)
-RH = "RH"       # Restricted Holiday (2 days/year)
-SCL = "SCL"     # Special Casual Leave (up to 15 days/year)
-EL = "EL"       # Earned Leave (30 days/year for staff, carries forward)
-VL = "VL"       # Vacation Leave (60 days/year for faculty, converts to EL 2:1)
-COL = "COL"     # Commuted / Medical Leave (20 days/year, carries forward)
+CL = "CL"  # Casual Leave (8 days/year, 0.5 half day)
+RH = "RH"  # Restricted Holiday (2 days/year)
+SCL = "SCL"  # Special Casual Leave (up to 15 days/year)
+EL = "EL"  # Earned Leave (30 days/year for staff, carries forward)
+VL = "VL"  # Vacation Leave (60 days/year for faculty, converts to EL 2:1)
+COL = "COL"  # Commuted / Medical Leave (20 days/year, carries forward)
 
 LEAVE_CATEGORIES = (CL, RH, SCL, EL, VL, COL)
 
@@ -48,12 +49,14 @@ STATUS_CANCELLED = "cancelled"
 STATUS_RESUMED = "resumed"
 
 TERMINAL_STATUSES = frozenset({STATUS_REJECTED, STATUS_WITHDRAWN, STATUS_CANCELLED, STATUS_RESUMED})
-ACTIVE_IN_FLIGHT_STATUSES = frozenset({
-    STATUS_PENDING_SUBSTITUTE,
-    STATUS_SUBSTITUTE_DECLINED,
-    STATUS_PENDING_UNIT_HEAD,
-    STATUS_PENDING_HIGHER_SANCTION,
-})
+ACTIVE_IN_FLIGHT_STATUSES = frozenset(
+    {
+        STATUS_PENDING_SUBSTITUTE,
+        STATUS_SUBSTITUTE_DECLINED,
+        STATUS_PENDING_UNIT_HEAD,
+        STATUS_PENDING_HIGHER_SANCTION,
+    }
+)
 
 # Substitute Response
 SUBSTITUTE_PENDING = "pending"

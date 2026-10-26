@@ -1,4 +1,5 @@
 """ELM's public contract surface. Plural by signature (ADR-0013)."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  Button, Card, Container, Grid, Select, Stack, TextInput, Textarea, Title
+  Button, Card, Checkbox, Container, Grid, Select, Stack, TextInput, Textarea, Title
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { PageHeader } from "../../../ui/components/PageHeader";
@@ -15,6 +15,11 @@ export default function AdminPage() {
     reason: "",
     offline_sanction_reference: "",
   });
+  const [holidayForm, setHolidayForm] = useState({
+    date: "",
+    name: "",
+    is_restricted_holiday: false,
+  });
 
   const handleRecordOffline = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,20 +33,43 @@ export default function AdminPage() {
           calculated_days: parseFloat(offlineForm.calculated_days),
         }),
       });
-      if (res.ok) {
-        notifications.show({ title: "Success", message: "Offline sanctioned leave recorded." });
-        setOfflineForm({
-          user_id: "",
-          leave_category: "CL",
-          start_date: "",
-          end_date: "",
-          calculated_days: "1.0",
-          reason: "",
-          offline_sanction_reference: "",
-        });
-      }
-    } catch (e: any) {
-      notifications.show({ title: "Error", message: e.message, color: "red" });
+      if (!res.ok) throw new Error(`Could not record offline leave (${res.status}).`);
+      notifications.show({ title: "Success", message: "Offline sanctioned leave recorded." });
+      setOfflineForm({
+        user_id: "",
+        leave_category: "CL",
+        start_date: "",
+        end_date: "",
+        calculated_days: "1.0",
+        reason: "",
+        offline_sanction_reference: "",
+      });
+    } catch (e) {
+      notifications.show({
+        title: "Error",
+        message: e instanceof Error ? e.message : "Could not record offline leave.",
+        color: "red",
+      });
+    }
+  };
+
+  const handlePublishHoliday = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("/api/v1/elm/admin/holidays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(holidayForm),
+      });
+      if (!res.ok) throw new Error(`Could not publish holiday (${res.status}).`);
+      notifications.show({ title: "Success", message: "Holiday published." });
+      setHolidayForm({ date: "", name: "", is_restricted_holiday: false });
+    } catch (e) {
+      notifications.show({
+        title: "Error",
+        message: e instanceof Error ? e.message : "Could not publish holiday.",
+        color: "red",
+      });
     }
   };
 
@@ -49,7 +77,7 @@ export default function AdminPage() {
     <Container size="md">
       <PageHeader
         title="Leave Administration"
-        subtitle="Manage authorized offline leave records and administrative synchronization"
+        subtitle="Manage authorized offline leave records and the published holiday calendar"
       />
 
       <Card shadow="sm" padding="lg" withBorder component="form" onSubmit={handleRecordOffline}>
@@ -106,6 +134,34 @@ export default function AdminPage() {
             onChange={(e) => setOfflineForm({ ...offlineForm, reason: e.target.value })}
           />
           <Button type="submit">Record Offline Leave</Button>
+        </Stack>
+      </Card>
+
+      <Card shadow="sm" padding="lg" withBorder component="form" onSubmit={handlePublishHoliday} mt="lg">
+        <Title order={4} mb="md">Publish Holiday</Title>
+        <Stack gap="md">
+          <TextInput
+            label="Date"
+            type="date"
+            value={holidayForm.date}
+            onChange={(e) => setHolidayForm({ ...holidayForm, date: e.target.value })}
+            required
+          />
+          <TextInput
+            label="Holiday Name"
+            value={holidayForm.name}
+            onChange={(e) => setHolidayForm({ ...holidayForm, name: e.target.value })}
+            required
+          />
+          <Checkbox
+            label="Restricted Holiday"
+            checked={holidayForm.is_restricted_holiday}
+            onChange={(e) => setHolidayForm({
+              ...holidayForm,
+              is_restricted_holiday: e.currentTarget.checked,
+            })}
+          />
+          <Button type="submit">Publish Holiday</Button>
         </Stack>
       </Card>
     </Container>

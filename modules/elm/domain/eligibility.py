@@ -1,10 +1,10 @@
 """Validation and eligibility domain rules (Section 3, 5, 6)."""
+
 from datetime import date
 from decimal import Decimal
 
 from modules.elm.domain.constants import (
     CL,
-    EL,
     HALF_DAY_FIRST,
     HALF_DAY_SECOND,
     RH,
@@ -33,14 +33,19 @@ def validate_eligibility_and_balance(
         if employee_kind != "faculty":
             raise ValidationError("Vacation Leave (VL) is applicable to faculty members only.")
         if not is_vacation_period:
-            raise ValidationError("VL may be availed only during an applicable academic vacation period.")
+            raise ValidationError(
+                "VL may be availed only during an applicable academic vacation period."
+            )
 
     if category == RH and not is_rh_calendar_day:
-        raise ValidationError("An RH request must correspond to an applicable Restricted Holiday in the calendar.")
+        raise ValidationError(
+            "An RH request must correspond to an applicable Restricted Holiday in the calendar."
+        )
 
     if requested_days > available_balance:
         raise ValidationError(
-            f"Insufficient leave balance. Requested: {requested_days}, Available: {available_balance}."
+            "Insufficient leave balance. "
+            f"Requested: {requested_days}, Available: {available_balance}."
         )
 
 
@@ -94,4 +99,6 @@ def validate_substitute(
         e_start: date = item["start_date"]
         e_end: date = item["end_date"]
         if not (end_date < e_start or start_date > e_end):
-            raise ValidationError("Nominated substitute has active leave during the requested period.")
+            raise ValidationError(
+                "Nominated substitute has active leave during the requested period."
+            )

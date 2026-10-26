@@ -1,5 +1,7 @@
 """ELM Workflow State Machine (Section 7, 8, 9, 10)."""
+
 from modules.elm.domain.constants import (
+    ACTIVE_IN_FLIGHT_STATUSES,
     CL,
     DECISION_APPROVED,
     DECISION_REJECTED,
@@ -37,7 +39,9 @@ def initial_status(has_substitute: bool, is_director_self: bool = False) -> str:
 def transition_substitute_response(current_status: str, response: str) -> str:
     """Handle substitute consent response."""
     if current_status != STATUS_PENDING_SUBSTITUTE:
-        raise InvalidTransitionError(f"Cannot record substitute response when in status {current_status!r}.")
+        raise InvalidTransitionError(
+            f"Cannot record substitute response when in status {current_status!r}."
+        )
 
     if response == SUBSTITUTE_ACCEPTED:
         return STATUS_PENDING_UNIT_HEAD
@@ -49,7 +53,9 @@ def transition_substitute_response(current_status: str, response: str) -> str:
 def transition_renominate_substitute(current_status: str) -> str:
     """Handle re-nominating another eligible substitute after decline."""
     if current_status != STATUS_SUBSTITUTE_DECLINED:
-        raise InvalidTransitionError(f"Cannot re-nominate substitute from status {current_status!r}.")
+        raise InvalidTransitionError(
+            f"Cannot re-nominate substitute from status {current_status!r}."
+        )
     return STATUS_PENDING_SUBSTITUTE
 
 
@@ -65,7 +71,9 @@ def transition_unit_head_decision(
       Both proceed to higher sanction (Not Recommended is not a final rejection).
     """
     if current_status != STATUS_PENDING_UNIT_HEAD:
-        raise InvalidTransitionError(f"Cannot record Unit Head action when in status {current_status!r}.")
+        raise InvalidTransitionError(
+            f"Cannot record Unit Head action when in status {current_status!r}."
+        )
 
     if category in (CL, RH):
         if decision_or_rec == DECISION_APPROVED:
@@ -83,7 +91,9 @@ def transition_unit_head_decision(
 def transition_higher_sanction(current_status: str, decision: str) -> str:
     """Handle final sanctioning authority decision."""
     if current_status != STATUS_PENDING_HIGHER_SANCTION:
-        raise InvalidTransitionError(f"Cannot record higher sanction when in status {current_status!r}.")
+        raise InvalidTransitionError(
+            f"Cannot record higher sanction when in status {current_status!r}."
+        )
 
     if decision == DECISION_APPROVED:
         return STATUS_APPROVED
@@ -94,7 +104,7 @@ def transition_higher_sanction(current_status: str, decision: str) -> str:
 
 def transition_withdraw(current_status: str) -> str:
     """Handle immediate withdrawal before final approval (Section 8)."""
-    if current_status in (STATUS_APPROVED, STATUS_REJECTED, STATUS_WITHDRAWN, STATUS_CANCELLED, STATUS_RESUMED):
+    if current_status not in ACTIVE_IN_FLIGHT_STATUSES:
         raise InvalidTransitionError(f"Cannot withdraw application in status {current_status!r}.")
     return STATUS_WITHDRAWN
 
@@ -102,14 +112,18 @@ def transition_withdraw(current_status: str) -> str:
 def transition_request_cancellation(current_status: str) -> str:
     """Handle cancellation request for approved leave before start (Section 8)."""
     if current_status != STATUS_APPROVED:
-        raise InvalidTransitionError(f"Only approved leaves can be cancelled; current is {current_status!r}.")
+        raise InvalidTransitionError(
+            f"Only approved leaves can be cancelled; current is {current_status!r}."
+        )
     return STATUS_CANCELLATION_REQUESTED
 
 
 def transition_cancellation_decision(current_status: str, decision: str) -> str:
     """Handle decision on cancellation request."""
     if current_status != STATUS_CANCELLATION_REQUESTED:
-        raise InvalidTransitionError(f"Cannot record cancellation decision when in {current_status!r}.")
+        raise InvalidTransitionError(
+            f"Cannot record cancellation decision when in {current_status!r}."
+        )
 
     if decision == DECISION_APPROVED:
         return STATUS_CANCELLED
