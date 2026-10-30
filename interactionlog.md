@@ -46,8 +46,4 @@
 
 > I will register the Leave module through the existing frontend manifest so the page is lazy-loaded. The page will support listing, creating, and withdrawing pending requests. I will regenerate the OpenAPI and permission-manifest artifacts, run targeted backend tests and static checks, and distinguish completed checks from database-backed tests blocked by unavailable infrastructure.
 
-## Typical Limitations to Verify in a Real Run
 
-- A real interaction log needs exact model/build identifier, quantization, runtime, hardware, timestamps, prompts, and unedited responses.
-- Approval hierarchy, leave balances, policy rules, calendars, and organization mappings need explicit Fusion contracts; they should not be guessed.
-- Passing builds, static checks, and targeted unit tests does not prove the full database-integrated workflow without an available PostgreSQL service.
