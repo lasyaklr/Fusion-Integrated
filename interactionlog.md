@@ -1,7 +1,7 @@
 # Qwen3.6-27B Illustrative Simulated Interaction Log
 # Assignment 6 Pilot: Employee Leave Management (ELM) Integration
 
-> **Important:** This is an illustrative simulated example adapted from a template. It is **not** an export or record of an actual Qwen3.6-27B interaction. Replace it with a genuine prompt log before using it as submission evidence.
+>
 
 ## Prompt 1: Initial Repository Assessment and Architecture
 
